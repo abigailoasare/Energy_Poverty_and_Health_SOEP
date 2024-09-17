@@ -1,0 +1,442 @@
+# Load relevant Packages------------------------------------------
+library("data.table")
+library("foreign")
+library("haven")
+library("dplyr")
+library("Hmisc")
+library("expss")
+library("ggplot2")
+library("openxlsx")
+library("reshape2")
+library("tidyverse")
+library("utils")
+library("weights")
+library("tidyr")
+library("plm")
+library("readr")
+library("survey")
+
+# Setup -------------------------------------------------------------------
+source("./00_setup.R")
+
+# Upload Household and Individual Data -----------------------------------------
+hhpp <- read_dta(file.path(dir[["soep_processed"]], "hhpp.dta"))
+
+#  10% Rule ---------------------------------------------------------------
+
+### Square root ----------------------------------------------------
+hhpp <- hhpp %>%
+  dplyr::mutate(
+    enexpmsh1 = enexpmeq1 / incmeq1,
+    enexpysh1 = enexpyeq1 / incyeq1,
+    tenm1 = NA_real_,
+    teny1 = NA_real_
+  ) %>%
+  dplyr::mutate(
+    tenm1 = ifelse(enexpmsh1 >= 0.1, 1, tenm1),
+    tenm1 = ifelse(enexpmsh1 < 0.1, 0, tenm1),
+    teny1 = ifelse(enexpysh1 >= 0.1, 1, teny1),
+    teny1 = ifelse(enexpysh1 < 0.1, 0, teny1)
+  ) %>%
+  expss::apply_labels(enexpmsh1 = "Eq. energy expenditure / eq. income (sqrt)")
+
+
+
+### OECD scale -------------------------------------------------------
+hhpp <- hhpp %>%
+  dplyr::mutate(
+    enexpmsh2 = enexpmeq2 / incmeq2,
+    enexpysh2 = enexpyeq2 / incyeq2,
+    tenm2 = NA_real_,
+    teny2 = NA_real_
+  ) %>%
+  dplyr::mutate(
+    tenm2 = ifelse(enexpmsh2 >= 0.1, 1, tenm2),
+    tenm2 = ifelse(enexpmsh2 < 0.1, 0, tenm2),
+    teny2 = ifelse(enexpysh2 >= 0.1, 1, teny2),
+    teny2 = ifelse(enexpysh2 < 0.1, 0, teny2)
+  ) %>%
+  expss::apply_labels(enexpmsh2 = "Eq. energy expenditure / eq. income (OECD)")
+
+
+
+# 2M_share Indicators -----------------------------------------------------------
+# Calculate the median of the share of
+# (equivalised) energy expenditure of the (equivalised) income
+
+### Square root --------------------------------------------------------------
+hhpp <- hhpp %>%
+  dplyr::mutate(enexpmeq1_50sh = NA_real_,
+                enexpyeq1_50sh = NA_real_)
+
+
+years <- 1984:2021
+
+for (i in years) {
+  summary_stats <- hhpp %>%
+    dplyr::filter(syear == i) %>%
+    dplyr::summarise(m50 = median((enexpmeq1 / incmeq1), na.rm = TRUE),
+                     y50 = median((enexpyeq1 / incyeq1), na.rm = TRUE))
+  
+  hhpp$enexpmeq1_50sh[hhpp$syear == i] <-
+    summary_stats$m50
+  
+  hhpp$enexpyeq1_50sh[hhpp$syear == i] <-
+    summary_stats$y50
+}
+
+
+# Twice the median (2M)
+
+hhpp <- hhpp %>%
+  dplyr::mutate(dm1_2msh = 2 * enexpmeq1_50sh,
+                dy1_2msh = 2 * enexpyeq1_50sh)
+
+
+# 2M indicator
+
+hhpp <- hhpp %>%
+  dplyr::mutate(
+    epm1_2msh  = ifelse(enexpmsh1 > dm1_2msh , 1, 0),
+    epy1_2msh  = ifelse(enexpysh1 > dy1_2msh , 1, 0)
+  ) %>%
+  expss::apply_labels(epm1_2m = "Monthly energy poor (2M share-sqrt)",
+                      epy1_2m = "Yearly energy poor (2M share-sqrt)")
+
+
+
+
+### OECD  -----------------------------------
+hhpp <- hhpp %>%
+  dplyr::mutate(enexpmeq2_50sh = NA_real_,
+                enexpyeq2_50sh = NA_real_)
+
+
+years <- 1984:2021
+
+for (i in years) {
+  summary_stats <- hhpp %>%
+    dplyr::filter(syear == i) %>%
+    dplyr::summarise(m50 = median((enexpmeq2 / incmeq2), na.rm = TRUE),
+                     y50 = median(enexpyeq2 / incyeq2, na.rm = TRUE))
+  
+  hhpp$enexpmeq2_50sh[hhpp$syear == i] <-
+    summary_stats$m50
+  
+  hhpp$enexpyeq2_50sh[hhpp$syear == i] <-
+    summary_stats$y50
+}
+
+
+# Twice the median (2M)
+
+hhpp <- hhpp %>%
+  dplyr::mutate(dm2_2msh = 2 * enexpmeq2_50sh,
+                dy2_2msh = 2 * enexpyeq2_50sh)
+
+
+# 2M indicator
+
+hhpp <- hhpp %>%
+  dplyr::mutate(
+    epm2_2msh  = ifelse(enexpmsh2 > dm2_2msh , 1, 0),
+    epy2_2msh  = ifelse(enexpysh2 > dy2_2msh , 1, 0)
+  ) %>%
+  expss::apply_labels(epm2_2m = "Monthly energy poor (2M share-OECD)",
+                      epy2_2m = "Yearly energy poor (2M share-OECD)")
+
+
+
+
+# LIHC -----------------------------------------------------------------------
+
+
+### Square root -----------------------------------------------------
+
+#HC: household's (equivalised) energy expenditure is above the
+#national median level
+
+#Calculate the national median of (equivalised) energy expenditure
+
+hhpp <- hhpp %>%
+  dplyr::mutate(enexpmeq1_50 = NA_real_,
+                enexpyeq1_50 = NA_real_)
+
+
+
+for (i in years) {
+  summary_stats <- hhpp %>%
+    dplyr::filter(syear == i) %>%
+    dplyr::summarise(m50 = median(enexpmeq1, na.rm = TRUE),
+                     y50 = median(enexpyeq1, na.rm = TRUE))
+  
+  hhpp$enexpmeq1_50[hhpp$syear == i] <- summary_stats$m50
+  hhpp$enexpyeq1_50[hhpp$syear == i] <- summary_stats$y50
+}
+
+
+hhpp <- hhpp %>%
+  expss::apply_labels(enexpmeq1_50 = "Monthly median eq. energy expenditure (sqrt)",
+                      enexpyeq1_50 = "Yearly median eq. energy expenditure (sqrt)")
+
+
+
+hhpp <- hhpp %>%
+  dplyr::mutate(
+    hcm1  = ifelse(enexpmeq1 >= enexpmeq1_50, 1, 0),
+    hcy1  = ifelse(enexpyeq1 >= enexpyeq1_50, 1, 0)
+    
+  )
+
+
+# LI: household's (equivalised) income, after (equivalised) energy
+# expenditure, is below the official poverty line
+
+# Calculate (equivalised) income after (equivalised) energy expenditure
+
+hhpp <- hhpp %>%
+  dplyr::mutate(incmeq1_aee = incmeq1 - enexpmeq1,
+                incyeq1_aee = incyeq1 - enexpyeq1) %>%
+  expss::apply_labels(incmeq1_aee = "Monthly eq.income after eq.energy expenditure (sqrt)",
+                      incyeq1_aee = "Yearly eq.income after eq.energy expenditure (sqrt)")
+
+
+
+# Calculate the official poverty line
+# (at-risk-of-poverty threshold: 60 % of
+# national median equivalised income) for each year
+
+
+hhpp <- hhpp %>%
+  dplyr::mutate(incpvm1 = NA_real_,
+                incpvy1 = NA_real_)
+
+
+for (i in years) {
+  summary_stats <- hhpp %>%
+    dplyr::filter(syear == i) %>%
+    dplyr::summarise(m50 = median(incmeq1, na.rm = TRUE),
+                     y50 = median(incyeq1, na.rm = TRUE))
+  
+  hhpp$incpvm1[hhpp$syear == i] <- summary_stats$m50
+  hhpp$incpvy1[hhpp$syear == i] <- summary_stats$y50
+}
+
+
+hhpp <- hhpp %>%
+  dplyr::mutate(pov_thrm1 = 0.6 * incpvm1,
+                pov_thry1 = 0.6 * incpvy1) %>%
+  expss::apply_labels(pov_thrm1 = "Monthly--At-risk-of-poverty threshold (sqrt)",
+                      pov_thry1 = "Yearly--At-risk-of-poverty threshold (sqrt)")
+
+
+
+hhpp <- hhpp %>%
+  dplyr::mutate(
+    lim1 = ifelse(incmeq1_aee <= pov_thrm1, 1, 0),
+    liy1 = ifelse(incyeq1_aee <= pov_thry1, 1, 0)
+  )
+
+
+#### LIHC indicator
+
+hhpp <- hhpp %>%
+  dplyr::mutate(lihc_m1 = lim1 * hcm1,
+                lihc_y1 = liy1 * hcy1) %>%
+  expss::apply_labels(lihc_m1 = "Monthly energy poor (LIHC--sqrt)",
+                      lihc_y1 = "Yearlyly energy poor (LIHC--sqrt)")
+
+### OECD -----------------------------------------------------
+
+#HC: household's (equivalised) energy expenditure is above the
+#national median level
+
+#Calculate the national median of (equivalised) energy expenditure
+
+hhpp <- hhpp %>%
+  dplyr::mutate(enexpmeq2_50 = NA_real_,
+                enexpyeq2_50 = NA_real_)
+
+
+
+for (i in years) {
+  summary_stats <- hhpp %>%
+    dplyr::filter(syear == i) %>%
+    dplyr::summarise(m50 = median(enexpmeq2, na.rm = TRUE),
+                     y50 = median(enexpyeq2, na.rm = TRUE))
+  
+  hhpp$enexpmeq2_50[hhpp$syear == i] <- summary_stats$m50
+  hhpp$enexpyeq2_50[hhpp$syear == i] <- summary_stats$y50
+}
+
+
+hhpp <- hhpp %>%
+  expss::apply_labels(enexpmeq2_50 = "Monthly median eq. energy expenditure (OECD)",
+                      enexpyeq2_50 = "Yearly median eq. energy expenditure (OECD)")
+
+
+
+hhpp <- hhpp %>%
+  dplyr::mutate(
+    hcm2  = ifelse(enexpmeq2 >= enexpmeq2_50, 1, 0),
+    hcy2  = ifelse(enexpyeq2 >= enexpyeq2_50, 1, 0)
+    
+  )
+
+
+# LI: household's (equivalised) income, after (equivalised) energy
+# expenditure, is below the official poverty line
+
+# Calculate (equivalised) income after (equivalised) energy expenditure
+
+hhpp <- hhpp %>%
+  dplyr::mutate(incmeq2_aee = incmeq2 - enexpmeq2,
+                incyeq2_aee = incyeq2 - enexpyeq2) %>%
+  expss::apply_labels(incmeq2_aee = "Monthly eq.income after eq.energy expenditure (OECD)",
+                      incyeq2_aee = "Yearly eq.income after eq.energy expenditure (OECD)")
+
+
+
+# Calculate the official poverty line
+# (at-risk-of-poverty threshold: 60 % of
+# national median equivalised income) for each year
+
+
+hhpp <- hhpp %>%
+  dplyr::mutate(incpvm2 = NA_real_,
+                incpvy2 = NA_real_)
+
+
+for (i in years) {
+  summary_stats <- hhpp %>%
+    dplyr::filter(syear == i) %>%
+    dplyr::summarise(m50 = median(incmeq2, na.rm = TRUE),
+                     y50 = median(incyeq2, na.rm = TRUE))
+  
+  hhpp$incpvm2[hhpp$syear == i] <- summary_stats$m50
+  hhpp$incpvy2[hhpp$syear == i] <- summary_stats$y50
+}
+
+
+
+hhpp <- hhpp %>%
+  dplyr::mutate(pov_thrm2 = 0.6 * incpvm2,
+                pov_thry2 = 0.6 * incpvy2) %>%
+  expss::apply_labels(pov_thrm2 = "Monthly--At-risk-of-poverty threshold (OECD)",
+                      pov_thry2 = "Yearly--At-risk-of-poverty threshold (OECD)")
+
+
+
+hhpp <- hhpp %>%
+  dplyr::mutate(
+    lim2 = ifelse(incmeq2_aee <= pov_thrm2, 1, 0),
+    liy2 = ifelse(incyeq2_aee <= pov_thry2, 1, 0)
+  )
+
+
+#### LIHC indicator
+
+hhpp <- hhpp %>%
+  dplyr::mutate(lihc_m2 = lim2 * hcm2,
+                lihc_y2 = liy2 * hcy2) %>%
+  expss::apply_labels(lihc_m2 = "Monthly energy poor (LIHC--OECD)",
+                      lihc_y2 = "Yearlyly energy poor (LIHC--OECD)")
+
+
+
+
+
+# Consensual  -----------------------------------------------------------------
+
+# hlf0617= Apartment heated/ yes(1) or No(2)
+# we changed the order to reflect the health outcome
+# 0 means the individual can heat his apartment and 1 means he/she can't
+
+hhpp <- hhpp %>%
+  dplyr::mutate(
+    consen = NA_real_,
+    consen  = ifelse(hlf0617 == 1, 0, consen),
+    consen  = ifelse(hlf0617 == 2, 1, consen),
+    consen_f  = ifelse(consen == 1 & hlf0618 == 1, 1, 0),
+    consen_f  = ifelse(is.na(consen), NA_real_, consen_f)
+  ) %>%
+  expss::apply_labels(consen = "Apartment heated 1= no, 0= yes",
+                      consen_f = "Apartment heated due to financial 1= no, 0= yes")
+
+
+
+
+# Composite indicator -------------------------------------------
+
+## Without rent ----------------------------------------
+hhpp <- hhpp %>%
+  dplyr::rowwise() %>%
+  dplyr::mutate(
+    compsm1 = ifelse(sum(
+      c(tenm1, epm1_2m, lihc_m1, consen, consen_f), na.rm = T
+    )
+    >= 2, 1, 0),
+    compsm1 = ifelse(
+      is.na(tenm1) & is.na(epm1_2m) & is.na(lihc_m1)
+      &
+        is.na(consen) & is.na(consen_f),
+      NA_real_,
+      compsm1
+    ),
+    
+    compsy1 = ifelse(sum(
+      c(teny1, epy1_2m, lihc_y1, consen, consen_f), na.rm = T
+    )
+    >= 2, 1, 0),
+    compsy1 = ifelse(
+      is.na(teny1) & is.na(epy1_2m) & is.na(lihc_y1)
+      &
+        is.na(consen) & is.na(consen_f),
+      NA_real_,
+      compsy1
+    )
+  ) %>%
+  dplyr::rowwise() %>%
+  dplyr::mutate(
+    compsm2 = ifelse(sum(
+      c(tenm2, epm2_2m, lihc_m2, consen, consen_f), na.rm = T
+    )
+    >= 2, 1, 0),
+    compsm2 = ifelse(
+      is.na(tenm2) & is.na(epm2_2m) & is.na(lihc_m2)
+      &
+        is.na(consen) & is.na(consen_f),
+      NA_real_,
+      compsm2
+    ),
+    
+    compsy2 = ifelse(sum(
+      c(teny2, epy2_2m, lihc_y2, consen, consen_f), na.rm = T
+    )
+    >= 2, 1, 0),
+    compsy2 = ifelse(
+      is.na(teny2) & is.na(epy2_2m) & is.na(lihc_y2)
+      &
+        is.na(consen) & is.na(consen_f),
+      NA_real_,
+      compsy2
+    )
+  )
+
+
+# Save data --------------------------------------------------------------------
+
+write_dta(hhpp, file.path(dir[["regression"]], "reg-full.dta"))
+
+
+
+rm(list = ls())
+
+
+
+
+
+
+
+
+
