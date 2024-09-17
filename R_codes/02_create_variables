@@ -1,0 +1,963 @@
+# Load relevant Packages------------------------------------------
+library("data.table")
+library("foreign")
+library("haven")
+library("dplyr")
+library("Hmisc")
+library("expss")
+library("ggplot2")
+library("openxlsx")
+library("reshape2")
+library("tidyverse")
+library("utils")
+library("weights")
+library("tidyr")
+library("plm")
+library("readr")
+library("survey")
+
+# Setup -------------------------------------------------------------------
+source("./00_setup.R")
+
+# Upload Household and Individual Data -----------------------------------------------------------
+hhpp <- read_dta(file.path(dir[["soep_processed"]], "hhpp.dta"))
+
+# combine cid and hid
+
+hhpp <- hhpp %>% 
+  mutate(chid = paste(cid, hid))
+
+
+hhpp$chid<- gsub(" ", "", hhpp$chid, fixed = TRUE)
+
+
+
+# Date Format -------------------------------------------------------------
+hhpp <- hhpp %>%
+  dplyr::arrange(pid, syear) %>% 
+  dplyr::group_by(pid) %>%
+  dplyr::mutate(hlk0060=ifelse(hlk0060 < 0, NA_real_,hlk0060),
+                hlk0059=ifelse(hlk0059< 0, NA_real_,hlk0059),
+                h_doi = paste(hlk0059,hlk0060, syear,sep="-"),
+                newdate = as.Date(h_doi, format = "%d-%m-%Y"),
+                h_moi= hlk0060
+  ) %>% 
+  dplyr::ungroup() 
+
+# Demographic variables ---------------------------------------------------
+
+## sex -------------------------------------
+
+
+hhpp <- hhpp %>%
+  mutate(
+    female = ifelse(d11102ll == 2, 1, NA_real_),
+    female = ifelse(d11102ll == 1, 0, female),
+    female = ifelse(d11102ll == -1, NA_real_, female)
+  )
+
+
+
+## Household types --------------------------------------------------------
+## Use couple without kids as a reference group
+hhpp <- hhpp %>%
+  dplyr::mutate(hhtype = ifelse(hgtyp1hh == 1,3,NA_real_),
+                hhtype = ifelse(hgtyp1hh == 2,1,hhtype),
+                hhtype = ifelse(hgtyp1hh == 3,2,hhtype),
+                hhtype = ifelse(hgtyp1hh == 4| hgtyp1hh == 5 | hgtyp1hh == 6,4,hhtype),
+                hhtype = ifelse(hgtyp1hh == 7| hgtyp1hh == 8,5,hhtype)
+  )
+
+table(hhpp$hhtype)
+
+# Generate household types with only 3 categories
+
+reg_df <- reg_df %>%
+  mutate(
+    partner = ifelse(hhtype == 1| hhtype == 4, 1,0),
+    w_kinds = ifelse(hhtype == 2| hhtype == 4, 1,0),
+    muti_hm = ifelse(hhtype == 5, 1,0)
+  )
+
+
+## 
+
+### Socioeconomic ties----------------------------------------------------
+
+
+
+hhpp <- hhpp %>%
+  dplyr::mutate(alone = ifelse(d11106 == 1,1,0),
+                hh_kids = ifelse(d11106 > 1 & d11107 > 0,1,0)
+  )
+
+
+## Nationality and migration background ------------------------------------
+hhpp <- hhpp %>%
+  dplyr::mutate(nation = pgnation,
+                nation = ifelse(nation < 0,NA_real_,nation),
+                nation = ifelse(nation == 1,1,2)
+  )
+
+
+table(hhpp$nation)
+
+## direct migration background (2) -- born in another country than Germany
+## born in Germany may have either no (1) or an indirect (3) migration background.
+
+table(hhpp$migback)
+hhpp <- hhpp %>%
+  dplyr::mutate(migback1 = migback,
+                migback1 = ifelse(migback1 == 2,1,0)
+  ) 
+
+table(hhpp$migback1)
+
+hhpp <- hhpp %>%
+  dplyr::mutate(migback2 = migback,
+                migback2 = ifelse(migback2 == 2 | migback2 == 3, 1,0)
+  )
+table(hhpp$migback2)
+
+## Urban or rural ------------------------------------
+table(hhpp$regtyp)
+hhpp <- hhpp %>%
+  dplyr::mutate(urban = regtyp,
+                urban = ifelse(urban < 0,NA_real_,urban),
+                urban = ifelse(urban == 1,1,0)
+  )
+table(hhpp$urban)
+
+## Federal states ----------------------------------------------------------
+hhpp <- hhpp %>%
+  mutate(region = ifelse(bula_h < 0, NA_real_, bula_h)) 
+
+
+## Age and age groups ------------------------------------
+hhpp <- hhpp %>%
+  dplyr::mutate(age = d11101,
+                age = ifelse(age == -1, NA_real_, age)) %>%
+  dplyr::mutate(
+    age_gr = ifelse(age >= 16 & age <= 20, 1, NA_real_),
+    age_gr = ifelse(age >= 21 & age <= 30, 2, age_gr),
+    age_gr = ifelse(age >= 31 & age <= 40, 3, age_gr),
+    age_gr = ifelse(age >= 41 & age <= 50, 4, age_gr),
+    age_gr = ifelse(age >= 51 & age <= 60, 5, age_gr),
+    age_gr = ifelse(age >= 61 & age <= 70, 6, age_gr),
+    age_gr = ifelse(age >= 71 & age <= 80, 7, age_gr),
+    age_gr = ifelse(age > 80, 8, age_gr)
+  ) %>%
+  dplyr::mutate(age_sq = age ^ 2)
+
+
+#hhpp <- na.omit(hhpp)
+
+# Socio-economic variables ------------------------------------------------
+## Education background ------------------------------------------------
+##Education - 0-upper secondary/A-level (reference), 1-No degree (pgpsbil = 5, 6, 8, -2, or -1)
+## 2-Lower secondary (pgpsbil = 1, 2, or 7, and pgpbbil01 = -2), 3-Tertary (pgpbbil02 1-10)
+hhpp <- mutate(hhpp, educ =     ifelse(pgpbbil02 == 1 | pgpbbil02 == 2 |pgpbbil02 == 3  |pgpbbil02 == 4 |pgpbbil02 == 5  |pgpbbil02 == 6 |pgpbbil02 == 7 |pgpbbil02 == 9 |pgpbbil02 == 10 , 3,
+                                       ifelse(pgpsbil == -2 | pgpsbil == 5 | pgpsbil == -1 | pgpsbil == 6 | pgpsbil == 8 , 1,
+                                              ifelse((pgpsbil == 1 | pgpsbil == 2  | pgpsbil == 7) & pgpbbil01 ==  -2, 2,
+                                                     0))))
+## Education level
+hhpp <- dplyr::mutate(hhpp, educ_lev = pgisced11,
+                      educ_lev = ifelse(educ_lev < 0, NA_real_, educ_lev)) 
+
+## Education background based on pgisced11
+table(hhpp$pgisced11)
+hhpp <- dplyr::mutate(hhpp, eduback = pgisced11,
+                      eduback = ifelse(eduback< 0, NA_real_, eduback),
+                      eduback = ifelse(eduback == 0 | eduback == 1, 1,eduback),
+                      eduback = ifelse(eduback == 2,2,eduback),
+                      eduback = ifelse(eduback == 3| eduback == 4 | eduback == 5,3,eduback),
+                      eduback = ifelse(eduback == 6| eduback == 7 | eduback == 8,4,eduback))
+
+table(hhpp$eduback)
+
+## Years of education
+hhpp <- dplyr::mutate(hhpp, educ_yrs = d11109,
+                      educ_yrs = ifelse(educ_yrs < 0, NA_real_, educ_yrs)
+) 
+
+test <- hhpp %>% 
+  dplyr::select(cid, hid, pid, syear, pgpbbil02, pgpsbil, pgpbbil01, d11109, educ, educ_yrs, educ_lev) 
+
+## Labor force status ----------------------------------------------------------------------
+hhpp <- dplyr::mutate(hhpp, lfs =     ifelse(pglfs == 2 | pgstib == 13  , 2,
+                                             ifelse(pglfs == 6, 1,
+                                                    ifelse(pglfs == 1| pglfs == 3 | pglfs == 4 | pglfs == 5  , 1,
+                                                           0))))
+test <- hhpp %>% 
+  dplyr::select(cid, hid, pid, syear, pglfs, pgstib, lfs) 
+
+table(hhpp$lfs)
+
+##  Tenure type: owner vs tenant ----------------------------------------------------------------------
+hhpp <- hhpp %>%
+  dplyr::mutate(
+    owner = ifelse(hlf0001_v3 < 0, NA_real_,hlf0001_v3),
+    owner = ifelse(hlf0001_v3 == 3, 1, 0)
+  ) 
+
+hhpp <- hhpp %>%
+  dplyr::mutate(
+    hgowner = ifelse(hgowner < 0, NA_real_,hgowner),
+    hgowner = ifelse(hgowner == 1, 1, 0)
+  ) 
+
+table(hhpp$owner)
+table(hhpp$hgowner)
+
+
+
+##  Income ----------------------------------------------------------------------
+
+test<-hhpp %>% 
+  dplyr::select(hhgr, d11106) %>% 
+  dplyr::mutate(size=hhgr-d11106) %>% 
+  dplyr::filter(hhgr!=d11106)
+
+# use d11106 instead of hhgr: hhgr has 0 and -2 but they are the same
+
+###  Equivalised income ------------------------------------------
+#### Square root scale -----------------------------------
+hhpp <- hhpp %>%
+  dplyr::mutate(incm = hgi1hinc,
+                incm = ifelse(incm < 0,0,incm),
+                incy = incm*12,
+                incmeq1 = incm/sqrt(d11106),
+                incyeq1 = incmeq1 *12 
+  ) 
+
+
+
+## OECD modified scale
+# https://www.oecd.org/economy/growth/OECD-Note-EquivalenceScales.pdf
+# https://www.ons.gov.uk/peoplepopulationandcommunity/..
+# ..personalandhouseholdfinances/incomeandwealth/compendium/..
+# ..familyspending/2015/chapter3equivalisedincome
+# 1.0 to first adult
+# 0.5 to second & each subsequent person aged 14 and over
+# 0.3 to each child aged under 14 
+
+#### OECD scale ------------------------------------
+### Children under 14 years 
+hhpp <- hhpp %>%
+  dplyr::mutate(d11101 = ifelse(d11101 == -1, NA_real_, d11101)) %>% 
+  dplyr::mutate(
+    age_LT14 = ifelse(d11101 < 14, 1, NA_real_),
+    age_LT14 = ifelse(is.na(age_LT14) & !is.na(d11101), 0, age_LT14)
+  ) %>% 
+  dplyr::group_by(chid, syear) %>%
+  dplyr::mutate(children_LT14 = sum(age_LT14, na.rm = TRUE)) %>%
+  dplyr::ungroup()
+
+summary(hhpp$children_LT14)
+
+# Equivalised based on oecd
+# d11106 is Number of Persons in HH
+
+hhpp <- hhpp %>%
+  dplyr::mutate(incmeq2 = incm/ (1.0 + (0.5 * (d11106 - 1 - children_LT14)) + (0.3 * children_LT14)),
+                incmeq2 = round(incmeq2,2),
+                incyeq2 = incmeq2 *12)
+
+
+
+
+### After rent equivalized income -------------------------------------------
+# test <- hhpp %>% 
+#   filter(hgrent<0)
+# unique(test$hgrent)
+
+hhpp<- hhpp %>%
+  dplyr::mutate(hgrent = ifelse(hgrent %in% c(-5, -2, -1), 0, hgrent))
+
+# summary(hhpp$hgrent)
+
+# Monthly cold rent  
+summary_table <- hhpp %>%
+  dplyr::group_by(syear) %>%
+  dplyr::summarise(sum_hgrent = sum(hgrent, na.rm = TRUE),
+                   mean_hgrent = mean(hgrent, na.rm = TRUE))
+
+summary_table
+rm(summary_table)
+
+hhpp<- hhpp %>%
+  dplyr::mutate(renty = hgrent*12)
+
+hhpp <- hhpp%>%
+  dplyr::mutate(
+    incm_ar = (ifelse(is.na(incm), 0, incm)
+               - ifelse(is.na(hgrent), 0, hgrent)),
+    incm_ar = ifelse(incm_ar < 0, 0, incm_ar)
+  ) 
+
+hhpp<- hhpp %>%
+  dplyr::mutate(incy_ar = incm_ar*12)
+
+## Disposal equivalizing monthly and yearly incomes after rent
+## Sqrt
+hhpp <- hhpp %>%
+  dplyr::mutate(incmeq_ar1 = incm_ar/sqrt(d11106),
+                incmeq_ar1 = round(incmeq_ar1, 2),
+                incyeq_ar1 = incmeq_ar1 * 12
+  ) 
+
+## OCED Scale
+hhpp <- hhpp %>%
+  dplyr::mutate(incmeq_ar2 = incm_ar/(1.0+(0.5*(d11106 - 1 - children_LT14))
+                                      + (0.3 * children_LT14)),
+                incmeq_ar2 = round(incmeq_ar2, 2),
+                incyeq_ar2 = incmeq_ar2 * 12
+  ) 
+
+# Housing conditions ------------------------------------------------------
+
+##construction year ----------------------------
+hhpp <- hhpp%>%
+  dplyr::mutate(hgcnstyrmax = ifelse(hgcnstyrmax < 0,0,hgcnstyrmax),
+                bcstry=cut2(hgcnstyrmax,cuts=c(1976,2000))
+  )
+unique(hhpp$bcstry)
+
+
+##apartment size -------------------------------------------
+
+hhpp <- hhpp %>%
+  dplyr::mutate(sqm= ifelse(hlf0019_v1 < 0, NA_real_,hlf0019_v1),
+                nrm=ifelse(hlf0021_h< 0, NA_real_,hlf0021_h),
+                sqmqu=cut2(sqm, c(50,100,150,1000))
+  )
+##apartment size per person ----------------------------------
+
+hhpp <- hhpp%>%
+  dplyr::mutate(sqmpp= sqm/d11106,
+                qmppqu = cut2(sqmpp, c(50,1000))
+  ) 
+
+
+##double-glazed window -----------------
+
+hhpp <- hhpp%>%
+  dplyr::mutate(hlf0529= ifelse(hlf0529 < 0, 0,hlf0529),
+                dglazedw = ifelse(hlf0529 == 1,1,0),
+                dglazedw = ifelse(is.na(hlf0529),0,dglazedw)
+  ) 
+
+
+##thermal insulation -------------------
+
+
+hhpp <- hhpp%>%
+  dplyr::mutate(hlf0530= ifelse(hlf0530 < 0, 0,hlf0530),
+                thinsul = ifelse(hlf0530 == 1,1,0),
+                thinsul = ifelse(is.na(hlf0530),0,thinsul)
+  ) 
+
+
+
+
+
+
+## Heating  types --------------------------------------------------------
+# check years with valid data points for heating types
+aggregate(hlf0551 ~ ., hhpp, mean)
+# 2015 has the most data points for the heating types
+
+
+heat_2015 <- hhpp %>% 
+  dplyr::filter(syear==2015) %>% 
+  dplyr::select(cid, 
+                hid,
+                pid,
+                hlf0540,
+                hlf0545,
+                hlf0551,
+                hlf0557,
+                hlf0564,
+                hlf0570,
+                hlf0576,
+                hlf0582,
+                hlf0587,
+                hlf0589) %>% 
+  dplyr::rename(district_heat=hlf0540,
+                Gas=hlf0545,
+                Liquidgas=hlf0551,
+                Electricity=hlf0557,
+                HeatingOil=hlf0564,
+                Coal=hlf0570,
+                Wood_Pellets=hlf0576,
+                Biomass=hlf0582,
+                Solar=hlf0587,
+                Environ=hlf0589)
+
+## General Heating type - 0-district heating,1-Gas,2-liquidgas,3-Electricity,4-heating oil,
+# 5-coal, 6-wood, 7-Biomas, 8- Solar, 9-Environment, 10-Other
+
+
+
+heat_2015_1 <- heat_2015 %>%
+  dplyr::mutate(heattype = ifelse(district_heat ==1, 0,
+                                  ifelse(Gas == 1 , 1,
+                                         ifelse(
+                                           Liquidgas == 1, 2,
+                                           ifelse(Electricity == 1, 3,
+                                                  ifelse(
+                                                    HeatingOil == 1, 4,
+                                                    ifelse(Coal == 1, 5,
+                                                           ifelse(
+                                                             Wood_Pellets == 1, 6,
+                                                             ifelse(Biomass == 1 , 7,
+                                                                    ifelse(Solar == 1 , 8,
+                                                                           ifelse(Environ == 1 , 9,
+                                                                                  10)))
+                                                           ))
+                                                  ))
+                                         ))))
+## Simplified Category 
+# Renewables-Solar,Biomass,Wood_Pellets,Environ;
+# Gas- Gas,Liquidgas
+# Electricity-Electricity
+# Oil-heating oil
+# Coal-coal
+# District-district heating
+# other heating types-other
+
+heat_2015 <- heat_2015 %>%
+  dplyr::mutate(
+    heattype_bc = ifelse(
+      Solar == 1 |
+        Biomass == 7 | Wood_Pellets == 1 | Environ == 1,
+      "renewables",
+      ifelse(
+        Gas == 1 | Liquidgas == 1,
+        "gas",
+        ifelse(
+          Electricity == 1,
+          "electricity",
+          ifelse(HeatingOil == 1, "oil",
+                 ifelse(Coal == 1, "coal", 
+                        ifelse(district_heat == 1, "district","other"))
+          )
+        )
+      )
+    ))
+
+
+## Narrow Category 
+# Renewables-Solar,Biomass,Wood_Pellets,Environ,coal, liquid gas,Coal == 1,
+# Gas- Gas
+# Electricity-Electricity
+# Oil-heating oil
+# District-district heating
+# other heating types-other
+
+heat_2015 <- heat_2015 %>%
+  dplyr::mutate(
+    heattype_nc = ifelse(
+      Solar == 1 |
+        Biomass == 7 | 
+        Wood_Pellets == 1 | 
+        Environ == 1,
+      "renewables",
+      ifelse(
+        Gas == 1 |
+          Coal == 1 |
+          HeatingOil == 1|
+          Liquidgas == 1 ,
+        "fossil",
+        ifelse(
+          Electricity == 1,
+          "electricity",
+          ifelse(district_heat == 1, "district","other")
+        )
+      )
+    )
+  )
+
+
+# join heating data 
+hhpp <-
+  left_join(
+    hhpp,
+    heat_2015,
+    by = c(
+      'hid' = 'hid',
+      'cid' = 'cid',
+      'pid' = 'pid'
+      
+    )
+  )
+
+
+## Building Type, building proximity to other houses - isolated house as reference
+
+hhpp <- hhpp %>%
+  dplyr::mutate(buildtype = ifelse(wum1 == 3 , 1,
+                                   ifelse(wum1 == 4, 2,
+                                          ifelse(
+                                            wum1 == 5 , 2,
+                                            ifelse(wum1 == 6, 2,
+                                                   ifelse(wum1 == 7, 2,
+                                                          ifelse(
+                                                            wum1 <= -2, NA_real_,
+                                                            0
+                                                          )))
+                                          )))) 
+
+test<-hhpp %>% 
+  dplyr::select(wum1, buildtype)
+
+# Health outcomes ---------------------------------------------------------
+
+### Current self-assessed health status --------------------------
+# 5 scale but reversed
+# 1=Bad health
+# 5=Very good health
+
+hhpp<- hhpp %>%
+  dplyr::mutate(m11126_1= m11126,
+                m11126_1 = ifelse(m11126 < 0, NA_real_,m11126_1)
+  ) %>%
+  dplyr::mutate(csh =NA,
+                csh = ifelse(m11126_1 ==1,5,csh),
+                csh = ifelse(m11126_1 ==2,4,csh),
+                csh = ifelse(m11126_1 ==3,3,csh),
+                csh = ifelse(m11126_1 ==4,2,csh),
+                csh = ifelse(m11126_1 ==5,1,csh)
+  ) %>% 
+  mutate(poor_csh = ifelse(csh <3,1,0),
+         avg_csh = ifelse(csh==3,1,0),
+         good_csh = ifelse(csh >3,1,0)
+  )
+
+
+
+### Satisfaction with Health ------------------------------
+# 10 scale
+# 0=Completely dissatisfied
+# 10=Completely satisfied
+hhpp<- hhpp %>%
+  dplyr::mutate(swh = m11125,
+                swh = ifelse(m11125 < 0, NA_real_, swh)) %>%
+  expss::apply_labels(swh = "Satisfaction with Health")
+
+
+## poor satisfaction  -------------------
+
+hhpp <- hhpp %>%
+  dplyr::mutate(
+    swh_poor3 =  ifelse(swh < 5,1,0),
+    swh_poor3 =  ifelse(is.na(swh),NA_real_,swh_poor3)
+  ) 
+
+# test<-hhpp %>%
+#   dplyr::select(starts_with(c("swh","poor_","csh")))
+
+## Overall life satisfaction/Subjective well-being ------------------------------------------
+# 0=Completely dissatisfied
+# 10=Completely satisfied
+hhpp <- hhpp %>%
+  dplyr::mutate(swb = p11101,
+                swb = ifelse(p11101 < 0, NA_real_, swb)) %>%
+  expss::apply_labels(swb = "Subjective well-being")
+
+## Disability status of individual -------------------
+hhpp <- hhpp %>%
+  dplyr::mutate(disability = m11124,
+                disability = ifelse(disability < 0, NA_real_, disability)) %>%
+  expss::apply_labels(disability = "Disability")
+
+## Individuals with chronic illness -------------------
+hhpp <- hhpp %>%
+  dplyr::mutate(cillness = ple0036,
+                cillness = ifelse(cillness < 0, NA_real_, cillness),
+                cillness  = ifelse(cillness == 2, 0, cillness)) %>%
+  expss::apply_labels(cillness = "Chronic illness")
+
+# replace individuals with missing information on disability and chronic illness 
+# as individuals with no disability or chronic illness
+hhpp <- hhpp %>%
+  dplyr::mutate(disability= ifelse(!is.na(swh) & is.na(disability),0,disability),
+                cillness= ifelse(!is.na(swh) & is.na(cillness),0,cillness)
+  ) %>% 
+  dplyr::mutate(disability= ifelse(!is.na(csh) & is.na(disability),0,disability),
+                cillness= ifelse(!is.na(csh) & is.na(cillness),0,cillness)
+  )
+
+
+
+# Energy costs variables --------------------------------------------------
+
+# test<- hhpp %>% 
+#   dplyr::select(syear, hgheat,hlf0090_v2,hlf0543,hlf0544) %>% 
+#   filter(syear==2015)
+# 
+# test<- hhpp %>% 
+#   dplyr::select(syear, hgheat,hlf0090_v2,hlf0562,hlf0563,
+#                 hgelectr,hlf0084) %>% 
+#   filter(hgheat<0|hlf0090_v2<0|hlf0562<0|hgheat<0|hlf0563<0|hgelectr<0|
+#            hlf0084<0)
+# 
+# test<- hhpp %>% 
+#   dplyr::select(syear, hgheat,hlf0090_v2,hlf0562,hlf0563,
+#          hgelectr,hlf0084) %>% 
+#   group_by(syear) %>% 
+#   summarise(hgheat=sum(hgheat, na.rm =T )) %>% 
+#   ungroup()
+
+
+## Heating cost ------------------------------------------
+# owner heating cost is previous years cost but used as current heating cost
+# + tenants
+# if replace it by NA and sumber two columns we get NA
+
+hhpp <- hhpp %>%
+  dplyr::mutate(
+    heat_O = ifelse(hlf0090_v2 < 0,0,hlf0090_v2),
+    heat_O = heat_O/12,
+    heat_T = ifelse(hgheat < 0,0,hgheat),
+    heatm = heat_O + heat_T,
+    heaty = heatm*12
+  ) 
+test<- hhpp %>% 
+  dplyr::select(syear, hgheat,hlf0090_v2,heat_O , heat_T,heatm, heaty,hlf0562,hlf0563,
+                hgelectr,hlf0084) 
+
+## Electricity cost -------------------------------------
+
+
+# test<- hhpp %>% 
+#   dplyr::select(syear,hlf0084,hgelectr,hlf0562,hlf0563) %>% 
+#   filter(syear==2015)
+# 
+# test<- hhpp %>% 
+#   dplyr::select(syear,hlf0084,hgelectr,hlf0562,hlf0563) %>% 
+#   filter(hlf0562<0|hlf0563<0|hgelectr<0|
+#            hlf0084<0)
+# 
+# test<- hhpp %>% 
+#   dplyr::select(syear,hlf0084,hgelectr,hlf0562,hlf0563) %>% 
+#   group_by(syear) %>% 
+#   summarise(hgelectr=sum(hgelectr, na.rm =T),
+#             hlf0084=sum(hlf0084, na.rm =T)) %>% 
+#   ungroup()
+
+
+# owner electricity cost is previous years cost but used as current heating cost
+# + tenants
+
+hhpp <- hhpp %>%
+  dplyr::mutate(
+    elec_O = ifelse(hlf0084 < 0, 0,hlf0084),
+    elec_O = elec_O/12,
+    elec_T = ifelse(hgelectr < 0,0,hgelectr),
+    elecm = elec_O + elec_T,
+    elecy = elecm*12
+  ) 
+
+
+
+## Total energy expenditure --------------------------------------
+
+
+hhpp <- hhpp %>%
+  dplyr::mutate(enexpm = elecm + heatm,
+                enexpy = elecy + heaty
+  )
+
+
+# Equivalised energy expenditure -----------------------------------------
+
+## Square root --------------------------------------------
+
+hhpp <- hhpp%>%
+  dplyr::mutate(
+    elecmeq1 = elecm/sqrt(d11106),
+    elecyeq1 = elecmeq1*12,
+    heatmeq1 = heatm/sqrt(d11106),
+    heatyeq1 = heatmeq1*12,
+    enexpmeq1 = enexpm/sqrt(d11106),
+    enexpyeq1 = enexpmeq1*12
+  )
+
+## OECD scale ------------------------------------------------------
+
+hhpp <- hhpp%>%
+  dplyr::mutate(
+    elecmeq2 = elecm/(1.0 + (0.5 *(d11106 - 1 - children_LT14)) +(0.3 * children_LT14)),
+    elecmeq2 = round(elecmeq2,2),
+    elecyeq2 = elecmeq2*12,
+    heatmeq2 = heatm/(1.0 + (0.5 *(d11106 - 1 - children_LT14)) +(0.3 * children_LT14)),
+    heatmeq2 = round(heatmeq2,2),
+    heatyeq2 = heatmeq2*12,
+    enexpmeq2 = enexpm/(1.0 + (0.5 *(d11106 - 1 - children_LT14)) +(0.3 * children_LT14)),
+    enexpmeq2 = round(enexpmeq2,2),
+    enexpyeq2 = enexpmeq2*12
+    
+  ) 
+
+
+
+# Relative income -------------------------------------------------------------
+
+# OECD Method
+
+# Calculate median equivalised household income of
+#reference groups defined by age, sex and education level and region
+
+# weight is not allowed
+
+hhpp  <- hhpp  %>%
+  dplyr::arrange(age_gr,syear) %>%
+  dplyr::group_by(age_gr,syear) %>%
+  dplyr::mutate(refgr_age = median(incmeq2, na.rm=T)) %>%
+  dplyr::ungroup() %>%
+  dplyr::arrange(female,syear) %>%
+  dplyr::group_by(female,syear) %>%
+  dplyr::mutate(
+    refgr_sex = median(incmeq2, na.rm=T),
+    refgr_sex = ifelse(is.na(female), NA_real_, refgr_sex)
+  ) %>%
+  dplyr::ungroup() %>%
+  dplyr::arrange(educ_lev,syear) %>%
+  dplyr::group_by(educ_lev,syear) %>%
+  dplyr::mutate(
+    refgr_edu = median(incmeq2, na.rm=T),
+    refgr_edu = ifelse(is.na(educ_lev), NA_real_, refgr_edu)
+  ) %>%
+  dplyr::ungroup() %>%
+  dplyr::arrange(region,syear) %>%
+  dplyr::group_by(region,syear) %>%
+  dplyr::mutate(
+    refgr_regi = median(incmeq2, na.rm=T),
+    refgr_regi = ifelse(is.na(region), NA_real_,refgr_regi)
+  ) %>%
+  dplyr::ungroup() %>%
+  dplyr::arrange(pid, hid, syear)
+
+
+
+#Calculate the reference (equivalised household) income for each individual as
+#the mean (equivalised household) income of the three
+#respective reference groups
+
+
+hhpp <- hhpp %>%
+  dplyr::mutate(
+    incmeq2_com = (refgr_age + refgr_sex + refgr_edu+refgr_regi) / 4,
+    incmeq2_com = ifelse(
+      is.na(refgr_age) & is.na(refgr_sex) & is.na(refgr_edu),
+      NA_real_,
+      incmeq2_com
+    )
+  ) 
+
+
+hhpp <- hhpp %>%
+  mutate(incmeq2_rel=incmeq2 - incmeq2_com,
+         incmeq2_rel_1=incmeq2 - incmeq2_rel,
+         incmeq2_rel_2=incmeq2/incmeq2_rel)
+
+
+
+# Compare the equivalised household income of the
+#individual to the reference (equivalised household) income
+
+
+hhpp <- hhpp %>%
+  dplyr::mutate(
+    incmeq2_drel = 0,
+    incmeq2_drel = ifelse(incmeq2 < incmeq2_com,1,incmeq2_drel),
+    incmeq2_drel = ifelse(is.na(incmeq2_com),NA_real_,incmeq2_drel)
+  ) 
+
+#Dummy variable: incmeq2_drel = 1 if the equivalised household income is
+#lower than the equivalised household income of the reference group defined by
+#age, sex and education level and region
+
+
+# Label variables --------------------------------------------------
+
+hhpp <- hhpp %>%
+  expss::apply_labels(
+    female = "Female",
+    h_moi = "Month of the interview",
+    h_moi = num_lab(
+      "
+                            1 January
+                            2 February
+                            3 March
+                            4 April
+                            5 May
+                            6 June
+                            7 July
+                            8 August
+                            9 September
+                            10 October
+                            11 November
+                            12 December
+                             "
+    ),
+    nation = "Nationality",
+    nation = num_lab("
+                             1 Germany
+                             2 Others
+                             "),
+    hhtype = "Type of household (5 groups)",
+    hhtype = num_lab(
+      "
+                             1 Couple without kids
+                             2 Single parents
+                             3 One-person household
+                             4 Couple with kids
+                             5 Other household
+                             "
+    ),
+    urban = "Urban vs Rural",
+    urban = num_lab("
+                             1 Urban
+                             0 Rural
+                             "),
+    migback1 = "Migration background",
+    migback1 = num_lab("
+                             1 Direct
+                             0 No or Indirect
+                             "),
+    migback2 = "Migration background",
+    migback2 = num_lab("
+                             1 Direct or Indirect
+                             0 No
+                             "),
+    
+    region = "Region",
+    region = num_lab(
+      "
+                1 Schleswig-Holstein
+                2 Hamburg
+                3 Niedersachsen
+                4 Bremen
+                5 Nordrhein-Westfalen
+                6 Hessen
+                7 Rheinland-Pfalz,Saarland
+                8 Baden-Wuerttemberg
+                9 Bayern
+                10 Saarland
+                11 Berlin
+                12 Brandenburg
+                13 Mecklenburg-Vorpommern
+                14 Sachsen
+                15 Sachsen-Anhalt
+                16 Thueringen
+                              "
+    ),
+    age = "Age",
+    age_sq = "Age squared",
+    age_gr = num_lab(
+      "
+      1 Age 18 - 20
+      2 Age 21 - 30
+      3 Age 31 - 40
+      4 Age 41 - 50
+      5 Age 51 - 60
+      6 Age 61 - 70
+      7 Age 71 - 80
+      8 Age > 80
+      "
+    ),
+    
+    educ_lev = "Education level (ISCED 2011)",
+    educ_lev = num_lab(
+      "
+                             0 In school
+                             1 Primary education
+                             2 Lower secondary education
+                             3 Upper secondary education
+                             4 Post-secondary non-tertiary education
+                             5 Short-cycle tertiary education
+                             6 Bachelor's or equivalent level
+                             7 Master's or equivalent level
+                             8 Doctoral or equivalent level
+                             "
+    ),
+    eduback = "Education background",
+    eduback = num_lab(
+      "
+                             1 No degree
+                             2 Lower secondary degree
+                             3 Upper & Post secondary degree
+                             4 Tertiary degree
+                             "
+    ),
+    lfs = "Labour Force Status",
+    lfs = num_lab("
+                             0 Employed (self)
+                             1 Non-working
+                             2 Retired
+                             "),
+    owner = "1=property is owned 0 = otherwise)",
+    hgowner = "1=property is owned 0 = otherwise)",
+    incmeq1 = "Monthly equivalized income (sqrt)",
+    incyeq1 = "Yearly equivalized income (sqrt)",
+    children_LT14 = "Number of children (under 14) in household",
+    incyeq2 = "Yealy equivalised income (OECD)",
+    incmeq2 = "Monthly equivalised income (OECD)",
+    incmeq_ar1 = "Equivalised monthly income after rent (sqrt)",
+    incyeq_ar1 = "Equivalised yearly income after rent (sqrt)",
+    incmeq_ar2 = "Equivalised monthly income after rent (OECD)",
+    incyeq_ar2 = "Equivalised yearly income after rent (OECD)",
+    sqm = "Appartment size in Qm",
+    nrm = "number of living rooms",
+    sqmpp = "Appartment size in Qm per person",
+    buildtype = num_lab("
+                             0 Detached
+                             1 Semi-Detach
+                             2 Apartment Building
+                             "),
+    csh = "Current self-assessed health status",
+    csh = num_lab(
+      "
+                             5 Very good health
+                             4 Good health
+                             3 Fair health
+                             2 Poor health
+                             1 Bad health
+                             "
+    ),
+    heatm = "Monthly heating cost",
+    heaty = "Yearly heating cost",
+    elecm = "Monthly electricity cost",
+    elecy = "Yearly electricity cost",
+    enexpy = "Yearly energy expenditure",
+    enexpm = "Monthly energy expenditure",
+    elecmeq1 = "Monthly equivalised electricity expenditure (sqrt)",
+    elecyeq1 = "Yearly equivalised electricity expenditure (sqrt)",
+    heatmeq1 = "Monthly equivalised heat expenditure (sqrt)",
+    heatyeq1 = "Yearly equivalised heat expenditure (sqrt)",
+    enexpmeq1 = "Monthly equivalised energy expenditure (sqrt)",
+    enexpyeq1 = "Yearly equivalised energy expenditure (sqrt)",
+    elecmeq2 = "Monthly equivalised electricity expenditure (OECD)",
+    elecyeq2 = "Yearly equivalised electricity expenditure (OECD)",
+    heatmeq2 = "Monthly equivalised heat expenditure (OECD)",
+    heatyeq2 = "Yearly equivalised heat expenditure (OECD)",
+    enexpmeq2 = "Monthly equivalised energy expenditure (OECD)",
+    enexpyeq2 = "Yearly equivalised energy expenditure (OECD)",
+    incmeq2_rel = "Relative income by sex, edu, age and region",
+    incmeq2_drel = "Relative income Dummy"
+  )
+
+# Save data ----------------------------------------------
+
+write_dta(hhpp, file.path(dir[["soep_processed"]], "hhpp.dta"))
+
+rm(list = ls())
+
+
+
+
+
+
+
