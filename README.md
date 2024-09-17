@@ -4,7 +4,7 @@
 Evidence Based on German Socio-Economic Panel" paper by Asane-Otoo and Asare
 
 ## Data:
- **Note:** _Due to confidentiality, we can not make the SOEP data_.
+ **Note:** _Due to confidentiality, we can not make the SOEP data available_.
           _However, the datasets can be accessed from https://www.diw.de/en/diw_01.c.601584.en/data_access.html (upon registration)_.
 
 ## R_Codes folder:
