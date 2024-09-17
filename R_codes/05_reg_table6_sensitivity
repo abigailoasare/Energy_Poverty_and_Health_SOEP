@@ -1,0 +1,268 @@
+# Load relevant Packages------------------------------------------
+library("data.table")
+library("foreign")
+library("haven")
+library("dplyr")
+library("Hmisc")
+library("expss")
+library("ggplot2")
+library("tidyverse")
+library("utils")
+library("weights")
+library("tidyr")
+library("plm")
+library("readr")
+library("fixest")
+library("stargazer")
+library("MASS")
+
+# Current self-assessed health status
+# 5 scale but reversed
+# 1=Bad health
+# 5=Very good health
+
+# Setup -------------------------------------------------------------------
+source("./00_setup.R")
+
+# Load regression data -----------------------------------------
+reg_df <- read_dta(file.path(dir[["regression"]], "reg-full.dta"))
+
+
+
+# Set Estimation Sample Using (10%)--------------------------------
+
+reg_obs = feols(
+  csh ~ tenm2 + 
+    lim2+ age + as.factor(lfs) + educ_yrs + alone +
+    disability + cillness + urban + thinsul
+  | syear +
+    region+
+    chid^pid,
+  data=reg_df,
+  panel.id = ~ chid + pid + syear
+)
+
+etable(
+  reg_obs,
+  cluster = ~pid,
+  signif.code = c("*" = .1, "**" = .05,  "***" = 0.01)
+)
+
+
+#### Summary Statistic Regression Sample --------------------------------
+
+# Remove Obs that are not part of sample from original data set
+sample_df <- reg_df[unlist(reg_obs$obs_selection),]
+
+selected_column <- dplyr::select(sample_df, csh,swh,swb,
+                                 epm2_2msh,lihc_m2,consen,compsm2,incm,incmeq2,
+                                 enexpm,heatm,elecm,enexpmeq2,heatmeq2,elecmeq2
+)
+column_matrix <- as.matrix(selected_column)
+
+reg_var <- model.matrix(reg_obs)
+
+# Add the selected column to the model matrix
+model_sum <- cbind(selected_column, reg_var)
+
+stargazer(
+  model_sum,
+  summary = T,
+  type = "latex",
+  out = file.path(dir[["tables"]], "SS_csh_moecd.tex")
+)
+
+
+
+
+#### other statistics ---------------------------------------
+unq_hh <- length(unique(sample_df$chid))
+
+
+# Number of Individuals
+
+unq_ind <- length(unique(sample_df$pid))
+
+# OECD---Monthly Analyses------------------------------------------------
+
+# 10% Rule ----------------------------------------------
+
+reg_csh_10 = feols(
+  csh ~ tenm2 + 
+    lim2+ age + as.factor(lfs) + educ_yrs + alone +
+    disability + cillness + urban + thinsul
+  | syear +
+    region+
+    chid^pid,
+  data=reg_df,
+  subset = obs(reg_obs),
+  panel.id = ~ chid + pid + syear
+)
+
+etable(
+  reg_csh_10,
+  cluster = ~pid,
+  signif.code = c("*" = .1, "**" = .05,  "***" = 0.01)
+)
+
+
+
+
+
+
+# 2M share ----------------------------------------------
+
+reg_csh_2msh = feols(
+  csh ~ epm2_2msh + 
+    lim2+ age + as.factor(lfs) + educ_yrs + alone +
+    disability + cillness + urban + thinsul
+  | syear +
+    region+
+    chid^pid,
+  data=reg_df,
+  subset = obs(reg_obs),
+  panel.id = ~ chid + pid + syear
+)
+
+etable(
+  reg_csh_2msh,
+  cluster = ~pid,
+  signif.code = c("*" = .1, "**" = .05,  "***" = 0.01)
+)
+
+
+
+
+# LIHC ----------------------------------------------
+
+
+reg_csh_lihc = feols(
+  csh ~ lihc_m2 + 
+    lim2+ age + as.factor(lfs) + educ_yrs + alone +
+    disability + cillness + urban + thinsul
+  | syear +
+    region+
+    chid^pid,
+  data=reg_df,
+  subset = obs(reg_obs),
+  panel.id = ~ chid + pid + syear
+)
+
+etable(
+  reg_csh_lihc,
+  cluster = ~pid,
+  signif.code = c("*" = .1, "**" = .05,  "***" = 0.01)
+)
+
+
+
+
+
+# Composite 1 -----------------------------------------------------------------
+reg_csh_comp1 = feols(
+  csh ~ compsm2 + 
+    lim2+ age + as.factor(lfs) + educ_yrs + alone +
+    disability + cillness + urban + thinsul
+  | syear +
+    region+
+    chid^pid,
+  data=reg_df,
+  subset = obs(reg_obs),
+  panel.id = ~ chid + pid + syear
+)
+
+etable(
+  reg_csh_comp1,
+  cluster = ~pid,
+  signif.code = c("*" = .1, "**" = .05,  "***" = 0.01)
+)
+
+
+
+
+# Financial Consensual ----------------------------------------------
+# hlf0617= Apartment heated/ yes(1) or No(2) due to finance
+# we changed the order to reflect the health outcome
+# 0 means the individual can heat his apartment and 1 means he/she can't
+
+## set Observation for consensual ---------------------------------
+
+obs_ccf = feols(
+  csh ~ consen_f + 
+    lim2+ age + as.factor(lfs) + educ_yrs + alone +
+    disability + cillness + urban + thinsul
+  | syear +
+    region+
+    chid^pid,
+  data=reg_df,
+  panel.id = ~ chid + pid + syear
+)
+
+# Remove Obs that are not part of sample from original data set
+sample_df_ccf <- reg_df[unlist(obs_ccf$obs_selection),]
+
+#### other statistics  --------------------------------
+unq_hh_ccf <- length(unique(sample_df_ccf$chid))
+
+
+# Number of Individuals
+
+unq_ind_ccf <- length(unique(sample_df_ccf$pid))
+
+## Estimate----------------------------------
+
+reg_csh_ccf = feols(
+  csh ~ consen_f + 
+    lim2+ age + as.factor(lfs) + educ_yrs + alone +
+    disability + cillness + urban + thinsul
+  | syear +
+    region+
+    chid^pid,
+  data=reg_df,
+  subset = obs(obs_ccf),
+  panel.id = ~ chid + pid + syear
+)
+
+etable(
+  reg_csh_ccf,
+  cluster = ~pid,
+  signif.code = c("*" = .1, "**" = .05,  "***" = 0.01)
+)
+
+
+
+# Save all -----------------------------------------------------------
+
+etable(
+  reg_csh_10,
+  reg_csh_2msh,
+  reg_csh_lihc,
+  reg_csh_ccf,
+  reg_csh_comp1,
+  cluster = ~pid,
+  signif.code = c("*" = .1, "**" = .05,  "***" = 0.01),
+  title = "Current self-assessed health status--All Indicators",
+  tex = TRUE,
+  headers = c("10%", "2M", "LIHC","Fin_Consensual", "Composite"),
+  style.tex = style.tex("aer"),
+  fitstat = ~ wr2+ n,
+  file = file.path(dir[["tables"]], "csh_all_moecd.tex"),
+  replace = TRUE,
+  extralines = list(
+    "_^Number of Households" = c(unq_hh, unq_hh, unq_hh,unq_hh_ccf, unq_hh),
+    "_^Number of Individuals" = c(unq_ind, unq_ind, unq_ind, unq_ind_ccf,unq_ind)
+  )
+)
+
+
+
+
+
+rm(list = ls())
+
+
+
+
+
+
+
