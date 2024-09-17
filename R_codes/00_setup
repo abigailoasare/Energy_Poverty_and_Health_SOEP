@@ -1,0 +1,35 @@
+# Energy Poverty & Health Outcomes ----------------------------------------
+# General Setup -----------------------------------------------------------
+library("parallel")
+
+# Detect Cores available for parallel computing
+cores <- ifelse("Windows" %in% Sys.info(), 0L, parallel::detectCores())
+
+# Display error messages in English
+Sys.setenv(LANG = "en")
+
+# Directories -------------------------------------------------------------
+dir <- list()
+
+## Raw Data locations ------------------------------------------------------
+dir[["soep"]]  <- file.path("data-raw", "soepv38")
+
+## Processed Data locations ----------------------------------------------------
+dir[["soep_processed"]]  <- file.path("data-processed")
+
+
+## Regression Data locations ------------------------------------------------------
+dir[["regression"]] <- file.path("data-r4r")
+
+## Output locations ------------------------------------------------------
+dir[["tables"]]  <- file.path("output", "tables")
+dir[["figures"]] <- file.path("output", "figures")
+dir[["maps"]]    <- file.path("output", "maps")
+
+
+
+## Make directories --------------------------------------------------------
+lapply(dir, function(d) {
+  dir.create(d, showWarnings = FALSE, recursive = TRUE)
+})
+
