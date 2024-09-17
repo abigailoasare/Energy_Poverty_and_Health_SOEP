@@ -1,0 +1,290 @@
+# Load relevant Packages------------------------------------------
+library("data.table")
+library("foreign")
+library("haven")
+library("dplyr")
+library("Hmisc")
+library("expss")
+library("ggplot2")
+library("tidyverse")
+library("utils")
+library("weights")
+library("tidyr")
+library("plm")
+library("readr")
+library("fixest")
+library("stargazer")
+library("MASS")
+library("gdata")
+
+## Satisfaction with Health 
+# 10 scale
+# 0=Completely dissatisfied
+# 10=Completely satisfied
+
+# Setup -------------------------------------------------------------------
+source("./00_setup.R")
+
+# Load regression data -----------------------------------------
+reg_df <- read_dta(file.path(dir[["regression"]], "reg-full.dta"))
+
+
+
+
+# Set Estimation Sample Using (10%)--------------------------------
+
+
+reg_obs = feols(
+  swh ~ tenm2 + 
+    lim2+ age + as.factor(lfs) + educ_yrs + alone +
+    disability + cillness + urban + thinsul
+  
+  | syear +
+    region+
+    chid^pid,
+  data=reg_df,
+  panel.id = ~ chid + pid + syear
+)
+
+etable(
+  reg_obs,
+  cluster = ~pid,
+  signif.code = c("*" = .1, "**" = .05,  "***" = 0.01)
+)
+
+
+
+#### Preliminaries ----------------------------------------------------
+
+
+#### Summary Statistic Regression Sample --------------------------------
+
+# Remove Obs that are not part of sample from original data set
+sample_df <- reg_df[unlist(reg_obs$obs_selection),]
+
+selected_column <- dplyr::select(sample_df, csh,swh,swb,swh_excel,swh_good,
+                                 swh_poor,swh_expoor,poor_csh,avg_csh,good_csh,
+                                 swh_excel2,swh_good2,swh_poor2,swh_expoor2,
+                                 swh_vgood2,swh_poor3,swh_good3,
+                                 epm2_2msh,lihc_m2,consen,compsm2,incm,incmeq2,
+                                 enexpm,heatm,elecm,enexpmeq2,heatmeq2,elecmeq2
+)
+column_matrix <- as.matrix(selected_column)
+
+reg_var <- model.matrix(reg_obs)
+
+# Add the selected column to the model matrix
+model_sum <- cbind(selected_column, reg_var)
+
+stargazer(
+  model_sum,
+  summary = T,
+  type = "latex",
+  out = file.path(dir[["tables"]], "SS_swh_moecd.tex")
+)
+
+
+#### other statistics ---------------------------------------
+unq_hh <- length(unique(sample_df$chid))
+
+
+# Number of Individuals
+
+unq_ind <- length(unique(sample_df$pid))
+
+# OECD---Monthly Analyses------------------------------------------------
+
+# 10% Rule ----------------------------------------------
+
+reg_swh_10 = feols(
+  swh ~ tenm2 + 
+    lim2+ age + as.factor(lfs) + educ_yrs + alone +
+    disability + cillness + urban + thinsul
+  | syear +
+    region+
+    chid^pid,
+  data=reg_df,
+  subset = obs(reg_obs),
+  panel.id = ~ chid + pid + syear
+)
+
+etable(
+  reg_swh_10,
+  cluster = ~pid,
+  signif.code = c("*" = .1, "**" = .05,  "***" = 0.01)
+)
+
+
+
+
+
+
+# 2M share ----------------------------------------------
+
+reg_swh_2msh = feols(
+  swh ~ epm2_2msh + 
+    lim2+ age + as.factor(lfs) + educ_yrs + alone +
+    disability + cillness + urban + thinsul
+  | syear +
+    region+
+    chid^pid,
+  data=reg_df,
+  subset = obs(reg_obs),
+  panel.id = ~ chid + pid + syear
+)
+
+etable(
+  reg_swh_2msh,
+  cluster = ~pid,
+  signif.code = c("*" = .1, "**" = .05,  "***" = 0.01)
+)
+
+
+
+
+# LIHC ----------------------------------------------
+
+
+reg_swh_lihc = feols(
+  swh ~ lihc_m2 + 
+    lim2+ age + as.factor(lfs) + educ_yrs + alone +
+    disability + cillness + urban + thinsul
+  | syear +
+    region+
+    chid^pid,
+  data=reg_df,
+  subset = obs(reg_obs),
+  panel.id = ~ chid + pid + syear
+)
+
+
+etable(
+  reg_swh_lihc,
+  cluster = ~pid,
+  signif.code = c("*" = .1, "**" = .05,  "***" = 0.01)
+)
+
+
+
+# Composite 1 -----------------------------------------------------------------
+reg_swh_comp1 = feols(
+  swh ~ compsm2 + 
+    lim2+ age + as.factor(lfs) + educ_yrs + alone +
+    disability + cillness + urban + thinsul
+  | syear +
+    region+
+    chid^pid,
+  data=reg_df,
+  subset = obs(reg_obs),
+  panel.id = ~ chid + pid + syear
+)
+
+etable(
+  reg_swh_comp1,
+  cluster = ~pid,
+  signif.code = c("*" = .1, "**" = .05,  "***" = 0.01)
+)
+
+
+
+
+
+
+# Financial Consensual ----------------------------------------------
+# hlf0617= Apartment heated/ yes(1) or No(2)
+# we changed the order to reflect the health outcome
+# 0 means the individual can heat his apartment and 1 means he/she can't
+
+## set Observation for consensual ---------------------------------
+
+obs_ccf = feols(
+  swh ~ consen_f + 
+    lim2+ age + as.factor(lfs) + educ_yrs + alone +
+    disability + cillness + urban + thinsul
+  | syear +
+    region+
+    chid^pid,
+  data=reg_df,
+  panel.id = ~ chid + pid + syear
+)
+
+etable(
+  obs_ccf,
+  cluster = ~pid,
+  signif.code = c("*" = .1, "**" = .05,  "***" = 0.01)
+)
+
+
+# Remove Obs that are not part of sample from original data set
+sample_df_ccf <- reg_df[unlist(obs_ccf$obs_selection),]
+
+#### other statistics for Consensual
+# Number of Households
+unq_hh_ccf <- length(unique(sample_df_ccf$chid))
+
+
+# Number of Individuals
+
+unq_ind_ccf <- length(unique(sample_df_ccf$pid))
+
+
+
+## Estimate----------------------------------
+
+reg_swh_ccf = feols(
+  swh ~ consen_f + 
+    lim2+ age + as.factor(lfs) + educ_yrs + alone +
+    disability + cillness + urban + thinsul
+  | syear +
+    region+
+    chid^pid,
+  data=reg_df,
+  subset = obs(obs_ccf),
+  panel.id = ~ chid + pid + syear
+)
+
+
+etable(
+  reg_swh_ccf,
+  cluster = ~pid,
+  signif.code = c("*" = .1, "**" = .05,  "***" = 0.01)
+)
+
+
+# Save all ----------------------------------------------
+etable(
+  reg_swh_10,
+  reg_swh_2msh,
+  reg_swh_lihc,
+  reg_swh_ccf,
+  reg_swh_comp1,
+  cluster = ~pid,
+  signif.code = c("*" = .1, "**" = .05,  "***" = 0.01),
+  title = "Satisfaction with Health--All Indicators",
+  tex = TRUE,
+  headers = c("10%", "2M", "LIHC","Fin_Consensual", "Composite"),
+  style.tex = style.tex("aer"),
+  fitstat = ~ wr2+ n,
+  file = file.path(dir[["tables"]], "swh_all_moecd.tex"),
+  replace = TRUE,
+  extralines = list(
+    "_^Number of Households" = c(unq_hh, unq_hh, unq_hh,unq_hh_ccf, unq_hh),
+    "_^Number of Individuals" = c(unq_ind, unq_ind, unq_ind, unq_ind_ccf,unq_ind)
+  )
+)
+
+
+
+rm(list = ls())
+
+
+
+
+
+
+
+
+
+
+
+
