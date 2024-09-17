@@ -1,0 +1,120 @@
+# Load relevant Packages------------------------------------------
+library("data.table")
+library("foreign")
+library("haven")
+library("dplyr")
+library("Hmisc")
+library("expss")
+library("ggplot2")
+library("tidyverse")
+library("utils")
+library("weights")
+library("tidyr")
+library("plm")
+library("readr")
+library("fixest")
+library("xtable")
+library("stargazer")
+library("rattle")
+library("ggsci")
+library("MASS")
+
+## Satisfaction with Health 
+# 10 scale
+# 0=Completely dissatisfied
+# 10=Completely satisfied
+
+# Setup -------------------------------------------------------------------
+source("./00_setup.R")
+
+# Load regression data -----------------------------------------
+reg_df <- read_dta(file.path(dir[["regression"]], "reg-full.dta"))
+
+
+
+# Set Estimation Sample Using (10%)--------------------------------
+
+reg_obs = feols(
+  swh ~ tenm2 + 
+    lim2+ age + as.factor(lfs) + educ_yrs + alone +
+    disability + cillness + urban + thinsul
+  
+  | syear +
+    region+
+    chid^pid,
+  data=reg_df,
+  panel.id = ~ chid + pid + syear
+)
+
+etable(
+  reg_obs,
+  cluster = ~pid,
+  signif.code = c("*" = .1, "**" = .05,  "***" = 0.01)
+)
+
+# Remove Obs that are not part of sample from original data set
+sample_df <- reg_df[unlist(reg_obs$obs_selection),]
+
+
+
+# Income Groups ---------------------------- 
+
+# Generate 10 income groups
+
+inc_10gp <- sample_df %>% 
+  dplyr:: select(syear, chid, pid, swh, csh, swb, incm, incmeq2, elecm,
+                 heatm, enexpm, elecmeq2,heatmeq2,enexpmeq2,
+                 tenm2,epm2_2msh,lihc_m2, consen_f, compsm2
+  ) %>% 
+  mutate(sh_incmeq2_enexpmeq2 = (enexpmeq2/incmeq2)*100,
+         sh_incmeq2_enexpmeq2 = ifelse(is.infinite(sh_incmeq2_enexpmeq2),
+                                       NA_real_,
+                                       sh_incmeq2_enexpmeq2)
+  ) %>% 
+  dplyr::mutate(incg_10  = as.numeric(
+    rattle::binning(
+      incmeq2,
+      bins = 10,
+      method = c("quantile"),
+      labels = seq(1, 10, length.out = 10)
+    )
+  ))
+
+# Categorize Individuals based on Income groups ------------------------------
+
+cate <- inc_10gp %>% 
+  dplyr::group_by(incg_10) %>% 
+  dplyr::summarise(av_swh= mean(swh,na.rm=TRUE),
+                   av_csh= mean(csh,na.rm=TRUE),
+                   av_swb= mean(swb,na.rm=TRUE),
+                   av_incmeq2= mean(incmeq2,na.rm=TRUE),
+                   av_elecmeq2= mean(elecmeq2,na.rm=TRUE),
+                   av_heatmeq2= mean(heatmeq2,na.rm=TRUE),
+                   av_enexpmeq2= mean(enexpmeq2,na.rm=TRUE),
+                   av_sh_incmeq2_enexpmeq2= mean(sh_incmeq2_enexpmeq2,na.rm=TRUE),
+                   av_tenm2= (mean(tenm2,na.rm=TRUE))*100,
+                   av_epm2_2msh= (mean(epm2_2msh,na.rm=TRUE))*100,
+                   av_lihc_m2= (mean(lihc_m2,na.rm=TRUE))*100,
+                   av_consen_f= (mean(consen_f,na.rm=TRUE))*100,
+                   av_compsm2= (mean(compsm2,na.rm=TRUE))*100
+  )
+
+cate_tex <- cate %>%
+  pivot_longer(cols=c(starts_with("av_")),
+               names_to = "variables",
+               values_to = "average") %>% 
+  dplyr::mutate(average=round(average, 3)
+  ) %>% 
+  pivot_wider(id_cols="variables",
+              names_from ="incg_10",
+              values_from = "average")
+
+# Export to latex --------------------------------------------------------
+
+print(xtable(cate_tex), 
+      type = "latex",
+      file = file.path(dir[["tables"]],"Table_2.tex"))
+
+
+
+rm(list = ls())
