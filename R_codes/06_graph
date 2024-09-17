@@ -1,0 +1,239 @@
+# Load relevant Packages------------------------------------------
+library("data.table")
+library("foreign")
+library("haven")
+library("dplyr")
+library("Hmisc")
+library("expss")
+library("ggplot2")
+library("tidyverse")
+library("utils")
+library("weights")
+library("tidyr")
+library("plm")
+library("readr")
+library("fixest")
+library("stargazer")
+library("ggsci")
+library("MASS")
+
+## Satisfaction with Health 
+# 10 scale
+# 0=Completely dissatisfied
+# 10=Completely satisfied
+
+# Setup -------------------------------------------------------------------
+source("./00_setup.R")
+
+# Load regression data -----------------------------------------
+reg_df <- read_dta(file.path(dir[["regression"]], "reg-full.dta"))
+
+
+
+# Set Estimation Sample Using (10%)--------------------------------
+
+
+reg_obs = feols(
+  swh ~ tenm2 + 
+    lim2+ age + as.factor(lfs) + educ_yrs + alone +
+    disability + cillness + urban + thinsul
+  
+  | syear +
+    region+
+    chid^pid,
+  data=reg_df,
+  panel.id = ~ chid + pid + syear
+)
+
+etable(
+  reg_obs,
+  cluster = ~pid,
+  signif.code = c("*" = .1, "**" = .05,  "***" = 0.01)
+)
+
+
+# Remove Obs that are not part of sample from original data set
+sample_df <- reg_df[unlist(reg_obs$obs_selection),]
+
+
+
+# Average Health Satisfaction Over Years ---------------------------- 
+
+gragh_df1 <- sample_df %>%
+  dplyr::group_by(syear) %>%
+  dplyr::summarize(avg_health = mean(swh, na.rm=TRUE)
+  ) %>% 
+  dplyr::ungroup()
+
+gragh_mf1 <- sample_df %>%
+  dplyr::group_by(syear,female) %>%
+  dplyr::summarize(avg_health = mean(swh, na.rm=TRUE)
+  ) %>% 
+  dplyr::ungroup()
+
+gragh_fem1 <- gragh_mf1 %>%
+  dplyr::filter(female==1) 
+
+gragh_ma1 <- gragh_mf1 %>%
+  dplyr::filter(female==0) 
+
+# Create the plot
+plot_1 <- ggplot() +
+  geom_line(data = gragh_df1, aes(x = syear, y = avg_health, colour = "Overall", linetype = "Overall"), size = 0.8) +
+  geom_line(data = gragh_fem1, aes(x = syear, y = avg_health, colour = "Female", linetype = "Female"), size = 0.8) +
+  geom_line(data = gragh_ma1, aes(x = syear, y = avg_health, colour = "Male", linetype = "Male"), size = 0.8) +
+  scale_colour_manual(values = c("Overall" = "#882255", "Female" = "#009E73", "Male" = "#0072B2")) +
+  scale_linetype_manual(values = c("Overall" = "solid", "Female" = "longdash", "Male" = "dotted")) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(2010, 2022, by = 2)) +
+  scale_y_continuous(breaks = seq(6.5, 8.0, by = 0.2)) +
+  theme(
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 12),
+    axis.title = element_text(size = 12),
+    plot.title = element_text(size = 12, hjust = 0.5, face = "bold"),
+    legend.position = "right",
+    legend.title = element_text(size = 15),  # Set legend title text size
+    legend.text = element_text(size = 15),
+    strip.text = element_text(size = 15),
+    strip.text.y = element_text(angle = 180),
+    panel.grid.major = element_line(linewidth = 0.3),
+    panel.grid.minor = element_blank(),
+    axis.ticks.y = element_line(linewidth = 0.2),
+    axis.ticks.x = element_line(linewidth = 0.2),
+    plot.margin = unit(c(0.1, 0.1, 0, 0), "cm")
+  ) +
+  labs(
+    x = "",
+    y = "Average Satisfation with Health",
+    title = "",
+    colour = "Sample"  
+  ) +
+  guides(colour = guide_legend("Sample"), linetype = guide_legend("Sample")) 
+
+
+# Print the plot
+print(plot_1)
+
+
+# save plot
+png(filename= file.path(dir[["figures"]],
+                        "Figure_1a.png"), 
+    width = 15.5, height = 15, unit = "cm", res = 400)
+print(plot_1)
+dev.off()
+
+
+
+
+# Share of Individuals Indicators ---------------------------- 
+
+shr_indi <- sample_df %>% 
+  dplyr::group_by(syear) %>% 
+  dplyr::summarize(share_10p=sum(tenm2,na.rm=TRUE)/n(),
+                   share_2m=sum(epm2_2msh,na.rm=TRUE)/n(),
+                   share_lihc=sum(lihc_m2,na.rm=TRUE)/n(),
+                   share_comp=sum(compsm2,na.rm=TRUE)/n(),
+                   share_consen_f=sum(consen_f,na.rm=TRUE)/n()
+  ) %>% 
+  dplyr::ungroup()%>%
+  mutate(share_consen_f=ifelse(syear < 2015 & share_consen_f==0.00000000, NA_real_,share_consen_f)) %>% 
+  pivot_longer(cols=c(starts_with("share_")),
+               names_to = "type",
+               values_to = "share") %>% 
+  arrange(syear,share)
+
+# Create the plot
+
+plot_3 <- ggplot(shr_indi, aes(
+  x = syear,
+  y = share,
+  colour = type,
+  linetype = type
+)) +
+  geom_line(size = 0.7) +
+  scale_color_manual(
+    name = "EP Indicator",
+    labels = c("share_10p" = "10%",
+               "share_2m" = "2M share",
+               "share_lihc" = "LIHC",
+               "share_comp" = "Composite",
+               "share_consen_f" = "Consensual"),
+    values = c("#882255", "#0072B2", "#009E73", "#E6C200", "#D55E00")
+  ) +
+  scale_linetype_manual(
+    name = "EP Indicator",
+    labels = c("share_10p" = "10%",
+               "share_2m" = "2M share",
+               "share_lihc" = "LIHC",
+               "share_comp" = "Composite",
+               "share_consen_f" = "Consensual"),
+    values = c("solid", "dashed", "dotted", "dotdash", "twodash")
+  ) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(2010, 2020, by = 2)) +
+  scale_y_continuous(
+    breaks = seq(0.0, 0.5, 0.1),
+    labels = scales::percent_format(accuracy = 1)
+  ) +
+  theme(
+    axis.text.y =  element_text(size = 15),
+    axis.text.x = element_text(size = 15),
+    axis.title = element_text(size = 15),
+    plot.title = element_text(size = 12, hjust=0.5,face = "bold"),
+    legend.position = "right",
+    strip.text = element_text(size = 12),
+    strip.text.y = element_text(angle = 180),
+    panel.grid.major = element_line(),
+    panel.grid.minor = element_blank(),
+    axis.ticks.y = element_line(linewidth = 0.2),
+    axis.ticks.x = element_line(linewidth = 0.2),
+    legend.text = element_text(size = 12),
+    legend.title = element_blank(),
+    plot.margin = unit(c(0.1, 0.1, 0, 0), "cm")
+  )+
+  labs(
+    x = "",
+    y = "Share of Individuals (%)",
+    title = "",
+    colour = "EP Indicator"  
+  ) +
+  guides(colour = guide_legend("EP Indicator"), linetype = guide_legend("EP Indicator"))
+
+
+plot_3
+
+# save plot
+png(filename= file.path(dir[["figures"]],
+                        "Figure_2.png"), 
+    width = 15.5, height = 15, unit = "cm", res = 400)
+print(plot_3)
+dev.off()
+
+
+# Histogram ------------------------------------
+
+
+# Create a histogram
+hist_all <- ggplot(sample_df, aes(x = swh)) +
+  geom_histogram(binwidth = 2, fill = "gray", color = "black") +
+  labs(title = "",
+       x = "Satisfaction with health",
+       y = "Frequency") +
+  theme_minimal()
+
+
+hist_all
+
+# save plot
+png(filename= file.path(dir[["figures"]],
+                        "Figure_1b.png"), 
+    width = 15.5, height = 15, unit = "cm", res = 400)
+print(hist_all)
+dev.off()
+
+
+
+
+
+rm(list = ls())
