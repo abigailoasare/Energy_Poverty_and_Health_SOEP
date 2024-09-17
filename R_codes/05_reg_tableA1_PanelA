@@ -229,7 +229,7 @@ etable(
   signif.code = c("*" = .1, "**" = .05,  "***" = 0.01),
   title = "Current self-assessed health status -- Poor Health (1-2)",
   tex = TRUE,
-  headers = c("10%", "2M", "LIHC", "Consensual","Fin_Consensual", "Composite"),
+  headers = c("10%", "2M", "LIHC","Fin_Consensual", "Composite"),
   style.tex = style.tex("aer"),
   fitstat = ~ wr2+ n,
   file = file.path(dir[["tables"]], "csh_poor1_2_all_moecd.tex"),
