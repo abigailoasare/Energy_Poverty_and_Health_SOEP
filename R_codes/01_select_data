@@ -1,0 +1,408 @@
+# Load relevant Packages------------------------------------------
+library("data.table")
+library("foreign")
+library("haven")
+library("dplyr")
+library("Hmisc")
+library("expss")
+library("ggplot2")
+library("openxlsx")
+library("reshape2")
+library("tidyverse")
+library("utils")
+library("weights")
+library("tidyr")
+library("plm")
+library("readr")
+library("survey")
+
+# Setup -------------------------------------------------------------------
+source("./00_setup.R")
+
+# Household Data ----------------------------------------------------------
+## Household tracking -----------------------------------------------------
+hpathl <- read_dta(file.path(dir[["soep"]], "hpathl.dta"))
+hpathl <- subset(hpathl, syear >= 2010)
+
+## Gross household data ----------------------------------------------------
+hbrutto <-
+  read_dta(
+    file.path(dir[["soep"]], "hbrutto.dta"),
+    col_select = c("cid", "hid", "syear", "hhgr", "wum1", "wum2", "wum3", "bula_h",
+                   "bula_v1","bula_v2")
+  )
+hbrutto <- subset(hbrutto, syear >= 2010)
+
+
+
+## Generated household data ----------------------------------------------------
+hgen <- read_dta(
+  file.path(dir[["soep"]], "hgen.dta"),
+  col_select = c(
+    "cid",
+    "hid",
+    "syear",
+    "hghmonth",
+    "hgtyp2hh",
+    "hgtyp1hh",
+    "hgmoveyr",
+    "hgcnstyrmax",
+    "hgcnstyrmin",
+    "hgi1hinc",
+    "hgi2hinc",
+    "hgi3hinc",
+    "hgi4hinc",
+    "hgi5hinc",
+    "hgnuts1",
+    "hgseval",
+    "hgrent",
+    "hgheat",
+    "hgelectr",
+    "hghinc",
+    "hgrsubs",
+    "hgowner",
+    "hgroom",
+    "hgsize",
+    "hgeqpmglass",
+    "hgeqpinsul",
+    "hgeqpsol",
+    "hgeqpnrj",
+    "hgcnstyrmax",
+    "hgcnstyrmin",
+    "hgcondit"
+  )
+)
+hgen <- subset(hgen, syear >= 2010)
+
+## Household questionnaire data -----------------------------------------
+hl <- read_dta(
+  file.path(dir[["soep"]], "hl.dta"),
+  col_select = c(
+    "cid",
+    "hid",
+    "syear",
+    "hlc0005_v2",
+    "hlf0051",
+    "hlf0069_v5",
+    "hlf0088_v2",
+    "hlf0600",
+    "hlf0601",
+    "hlf0074_v2",
+    "hlf0075_v2",
+    "hlf0607",
+    "hlf0090_v2",
+    "hlf0078",
+    "hlf0084",
+    "hlf0617",
+    "hlf0618",
+    "hlf0019_v1",
+    "hlf0021_v1",
+    "hlf0001_v3",
+    "hlf0011_v5",
+    "hlf0034",
+    "hlf0035",
+    "hlf0036",
+    "hlf0529",
+    "hlf0530",
+    "hlf0540",
+    "hlf0545",
+    "hlf0551",
+    "hlf0557",
+    "hlf0564",
+    "hlf0570",
+    "hlf0576",
+    "hlf0582",
+    "hlf0587",
+    "hlf0589",
+    "hlf0154_v3",
+    "hlf0153_v3",
+    "hlf0596",
+    "hlc0064_v2",
+    "hlc0070_v2",
+    "hlc0083_v1",
+    "hlf0291",
+    "hlf0543",
+    "hlf0544",
+    "hlf0549",
+    "hlf0550",
+    "hlf0555",
+    "hlf0556",
+    "hlf0562",
+    "hlf0563",
+    "hlf0568",
+    "hlf0569",
+    "hlf0574",
+    "hlf0575",
+    "hlf0580",
+    "hlf0581",
+    "hlf0585",
+    "hlf0586",
+    "hlf0052",
+    "hlf0053",
+    "hlc0064_h",
+    "hlc0067_h",
+    "hlc0070_h",
+    "hlc0083_h",
+    "hlf0016_h",
+    "hlf0016_v1",
+    "hlf0016_v2",
+    "hlf0019_h",
+    "hlf0021_h",
+    "hlf0084",
+    "hlf0090_h",
+    "hlf0154_h",
+    "hlf0153_h",
+    "hlf0291",
+    "hlf0617",
+    "hlf0618",
+    "hlk0060",
+    "hlf0180",
+    "hlk0059"
+  )
+)
+hl <- subset(hl, syear >= 2010)
+
+
+## Regional data ---------------------------------------------------------
+rg <-
+  read_dta(file.path(dir[["soep"]], "regionl.dta"),
+           col_select = c("cid", "hid", "syear", "regtyp"))
+rg <- subset(rg, syear >= 2010)
+
+
+
+
+## Join household data -------------------------------------------------
+hh <-
+  left_join(
+    hpathl,
+    hgen,
+    by = c(
+      'hid' = 'hid',
+      'syear' = 'syear',
+      'cid' = 'cid'
+    ),
+    relationship = "one-to-one"
+  )
+hh <-
+  left_join (
+    hh,
+    hl,
+    by = c(
+      'hid' = 'hid',
+      'syear' = 'syear',
+      'cid' = 'cid'
+    ),
+    relationship = "one-to-one"
+  )
+hh <-
+  left_join (
+    hh,
+    hbrutto,
+    by = c(
+      'hid' = 'hid',
+      'syear' = 'syear',
+      'cid' = 'cid'
+    ),
+    relationship = "one-to-one"
+  )
+
+hh <-
+  left_join (
+    hh,
+    rg,
+    by = c(
+      'hid' = 'hid',
+      'syear' = 'syear',
+      'cid' = 'cid'
+    ),
+    relationship = "one-to-one"
+  )
+
+
+#hh <- na.omit(hh)
+
+#test <- hh %>%
+#  dplyr::select(cid, hid, syear, hlf0084, hgelectr, hlf0562, hlf0563)
+
+write_dta(hh, file.path(dir[["soep_processed"]], "hh.dta"))
+
+
+
+# Individual level Data -- Raw & Generated -------------------------------------
+pequiv <- read_dta(
+  file.path(dir[["soep"]], "pequiv.dta"),
+  col_select = c(
+    "cid",
+    "hid",
+    "pid",
+    "syear",
+    "d11106",
+    "d11107",
+    "d11101",
+    "d11102ll",
+    "d11104",
+    "d11108",
+    "d11109",
+    "m11124",
+    "m11125",
+    "m11126",
+    "p11101"
+  )
+)
+pequiv <- subset(pequiv, syear >= 2010)
+
+
+pgen <- read_dta(
+  file.path(dir[["soep"]], "pgen.dta"),
+  col_select = c(
+    "cid",
+    "hid",
+    "syear",
+    "pgmonth",
+    "pid",
+    "pgnation",
+    "pgstib",
+    "pgemplst",
+    "pglfs",
+    "pgjobch",
+    "pgisco88",
+    "pgisco08",
+    "pgkldb2010",
+    "pgnace2",
+    "pgisced97",
+    "pgisced11",
+    "pgbilzeit",
+    "pgpsbil",
+    "pgpbbil01",
+    "pgpbbil02",
+    "pgpbbil03",
+    "pgfield",
+    "pgdegree"
+  )
+)
+pgen <- subset(pgen, syear >= 2010)
+
+pl <- read_dta(
+  file.path(dir[["soep"]], "pl.dta"),
+  col_select = c(
+    "cid",
+    "hid",
+    "syear",
+    "pid",
+    "pnr",
+    "plh0037",
+    "plh0036",
+    "plh0012_v6",
+    "plh0333",
+    "ple0036"
+  )
+)
+pl <- subset(pl, syear >= 2010)
+
+pbrutto <- read_dta(
+  file.path(dir[["soep"]], "pbrutto.dta"),
+  col_select = c(
+    "cid",
+    "hid",
+    "syear",
+    "pid",
+    "geburt_h",
+    "geburt_v1",
+    "geburt_v2",
+    "sex_h",
+    "pnat_h",
+    "tagin",
+    "monin"
+  )
+)
+pbrutto <- subset(pbrutto, syear >= 2010)
+
+ppathl <- read_dta(
+  file.path(dir[["soep"]], "ppathl.dta"),
+  col_select = c(
+    "cid",
+    "hid",
+    "syear",
+    "pid",
+    "gebjahr",
+    "migback",
+    "sexor",
+    "corigin",
+    "sex",
+    "germborn"
+  )
+)
+ppathl <- subset(ppathl, syear >= 2010)
+
+## merge individual data sets --------------------------------------------------
+
+pp <-
+  left_join(
+    ppathl,
+    pequiv,
+    by = c(
+      "cid" = "cid",
+      "hid" = "hid",
+      "pid" = "pid",
+      "syear" = "syear"
+    ),
+    relationship = "one-to-one"
+  )
+pp <-
+  left_join(
+    pp,
+    pgen,
+    by = c(
+      "cid" = "cid",
+      "hid" = "hid",
+      "pid" = "pid",
+      "syear" = "syear"
+    ),
+    relationship = "one-to-one"
+  )
+pp <-
+  left_join(
+    pp,
+    pl,
+    by = c(
+      "cid" = "cid",
+      "hid" = "hid",
+      "pid" = "pid",
+      "syear" = "syear"
+    ),
+    relationship = "one-to-one"
+  )
+pp <-
+  left_join(
+    pp,
+    pbrutto,
+    by = c(
+      "cid" = "cid",
+      "hid" = "hid",
+      "pid" = "pid",
+      "syear" = "syear"
+    ),
+    relationship = "one-to-one"
+  )
+
+write_dta(pp, file.path(dir[["soep_processed"]], "pp.dta"))
+
+## Merge Household and Individual data
+hhpp <-
+  left_join(
+    pp,
+    hh,
+    by = c(
+      "cid" = "cid",
+      "hid" = "hid",
+      "syear" = "syear"
+    ),
+    relationship = "many-to-one"
+  )
+
+# save data --------------------------------------------------------------------
+write_dta(hhpp, file.path(dir[["soep_processed"]], "hhpp.dta"))
+
+rm(list = ls())
+
