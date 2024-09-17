@@ -191,7 +191,7 @@ etable(
 
 
 # Financial Consensual ----------------------------------------------
-# hlf0617= Apartment heated/ yes(1) or No(2)
+# hlf0617= Apartment heated/ yes(1) or No(2) due to finance
 # we changed the order to reflect the health outcome
 # 0 means the individual can heat his apartment and 1 means he/she can't
 
